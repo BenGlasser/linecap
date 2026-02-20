@@ -1,0 +1,42 @@
+name: Move Major Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Version tag to point v1 at (e.g., v1.2.3)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  move-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag exists
+        run: |
+          if ! git rev-parse "${{ inputs.version_tag }}" >/dev/null 2>&1; then
+            echo "::error::Tag ${{ inputs.version_tag }} does not exist."
+            exit 1
+          fi
+          echo "Tag ${{ inputs.version_tag }} exists at $(git rev-parse "${{ inputs.version_tag }}")"
+
+      - name: Extract major version
+        id: major
+        run: |
+          MAJOR=$(echo "${{ inputs.version_tag }}" | grep -oP '^v\d+')
+          echo "tag=$MAJOR" >> "$GITHUB_OUTPUT"
+          echo "Major tag: $MAJOR"
+
+      - name: Move major tag
+        run: |
+          COMMIT=$(git rev-parse "${{ inputs.version_tag }}")
+          git tag -fa "${{ steps.major.outputs.tag }}" "$COMMIT" -m "Move ${{ steps.major.outputs.tag }} to ${{ inputs.version_tag }}"
+          git push origin "${{ steps.major.outputs.tag }}" --force
+          echo "Moved ${{ steps.major.outputs.tag }} to ${{ inputs.version_tag }} ($COMMIT)"

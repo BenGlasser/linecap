@@ -1,0 +1,268 @@
+name: 'LineCap'
+description: 'Enforce maximum file line counts in CI'
+author: 'Ben Glasser'
+
+branding:
+  icon: 'shield'
+  color: 'purple'
+
+inputs:
+  max_lines:
+    description: 'Maximum number of lines allowed per file'
+    required: false
+    default: '400'
+  targets:
+    description: 'Comma-separated list of file targets: new, changed, all, explicit'
+    required: false
+    default: 'new'
+  explicit_files:
+    description: 'Newline-separated list of file paths (required when targets includes explicit)'
+    required: false
+    default: ''
+  include:
+    description: 'Newline-separated glob patterns to include (default: all files)'
+    required: false
+    default: ''
+  exclude:
+    description: 'Newline-separated glob patterns to exclude'
+    required: false
+    default: ''
+  diff_base:
+    description: 'Base ref/SHA for diff (default: auto-detected from event)'
+    required: false
+    default: ''
+  diff_head:
+    description: 'Head ref/SHA for diff (default: auto-detected from event)'
+    required: false
+    default: ''
+  fail_on_no_git:
+    description: 'Fail if git history is unavailable for diff targets'
+    required: false
+    default: 'true'
+
+outputs:
+  checked_files:
+    description: 'Newline-separated list of files that were checked'
+    value: ${{ steps.linecap.outputs.checked_files }}
+  offenders:
+    description: 'Newline-separated list of files exceeding the line limit'
+    value: ${{ steps.linecap.outputs.offenders }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: linecap
+      shell: bash
+      env:
+        INPUT_MAX_LINES: ${{ inputs.max_lines }}
+        INPUT_TARGETS: ${{ inputs.targets }}
+        INPUT_EXPLICIT_FILES: ${{ inputs.explicit_files }}
+        INPUT_INCLUDE: ${{ inputs.include }}
+        INPUT_EXCLUDE: ${{ inputs.exclude }}
+        INPUT_DIFF_BASE: ${{ inputs.diff_base }}
+        INPUT_DIFF_HEAD: ${{ inputs.diff_head }}
+        INPUT_FAIL_ON_NO_GIT: ${{ inputs.fail_on_no_git }}
+        EVENT_NAME: ${{ github.event_name }}
+        EVENT_PATH: ${{ github.event_path }}
+        GITHUB_SHA_REF: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+
+        MAX_LINES="${INPUT_MAX_LINES}"
+
+        # ── Detect base and head ──────────────────────────────────
+        BASE="${INPUT_DIFF_BASE}"
+        HEAD="${INPUT_DIFF_HEAD}"
+
+        if [[ -z "$BASE" || -z "$HEAD" ]]; then
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            if [[ -z "$BASE" ]]; then
+              BASE=$(jq -r '.pull_request.base.sha' "$EVENT_PATH")
+            fi
+            if [[ -z "$HEAD" ]]; then
+              HEAD=$(jq -r '.pull_request.head.sha' "$EVENT_PATH")
+            fi
+          elif [[ "$EVENT_NAME" == "push" ]]; then
+            if [[ -z "$BASE" ]]; then
+              BASE=$(jq -r '.before' "$EVENT_PATH")
+            fi
+            if [[ -z "$HEAD" ]]; then
+              HEAD="${GITHUB_SHA_REF}"
+            fi
+          fi
+        fi
+
+        # ── Handle shallow clones ─────────────────────────────────
+        needs_diff=false
+        IFS=',' read -ra TARGET_LIST <<< "$INPUT_TARGETS"
+        for t in "${TARGET_LIST[@]}"; do
+          t=$(echo "$t" | xargs)
+          if [[ "$t" == "new" || "$t" == "changed" ]]; then
+            needs_diff=true
+            break
+          fi
+        done
+
+        if [[ "$needs_diff" == "true" ]]; then
+          if [[ -n "$BASE" ]]; then
+            if ! git cat-file -e "$BASE" 2>/dev/null; then
+              echo "::notice::Base commit $BASE not available locally. Attempting fetch..."
+              git fetch --depth=1 origin "$BASE" 2>/dev/null || true
+              if ! git cat-file -e "$BASE" 2>/dev/null; then
+                if [[ "$INPUT_FAIL_ON_NO_GIT" == "true" ]]; then
+                  echo "::error::Cannot resolve base commit $BASE. Use fetch-depth: 0 or set fail_on_no_git: false."
+                  exit 1
+                else
+                  echo "::warning::Cannot resolve base commit $BASE. Skipping diff-based targets."
+                  BASE=""
+                fi
+              fi
+            fi
+          fi
+          if [[ -n "$HEAD" ]]; then
+            if ! git cat-file -e "$HEAD" 2>/dev/null; then
+              echo "::notice::Head commit $HEAD not available locally. Attempting fetch..."
+              git fetch --depth=1 origin "$HEAD" 2>/dev/null || true
+              if ! git cat-file -e "$HEAD" 2>/dev/null; then
+                if [[ "$INPUT_FAIL_ON_NO_GIT" == "true" ]]; then
+                  echo "::error::Cannot resolve head commit $HEAD. Use fetch-depth: 0 or set fail_on_no_git: false."
+                  exit 1
+                else
+                  echo "::warning::Cannot resolve head commit $HEAD. Skipping diff-based targets."
+                  HEAD=""
+                fi
+              fi
+            fi
+          fi
+        fi
+
+        # ── Collect file set (union of targets) ───────────────────
+        FILE_SET=""
+
+        for t in "${TARGET_LIST[@]}"; do
+          t=$(echo "$t" | xargs)
+          case "$t" in
+            new)
+              if [[ -n "$BASE" && -n "$HEAD" ]]; then
+                FILES=$(git diff --name-only --diff-filter=A "$BASE" "$HEAD" 2>/dev/null || true)
+                FILE_SET="${FILE_SET}${FILES:+$FILES"$'\n'"}"
+              fi
+              ;;
+            changed)
+              if [[ -n "$BASE" && -n "$HEAD" ]]; then
+                FILES=$(git diff --name-only --diff-filter=AMRC "$BASE" "$HEAD" 2>/dev/null || true)
+                FILE_SET="${FILE_SET}${FILES:+$FILES"$'\n'"}"
+              fi
+              ;;
+            all)
+              FILES=$(git ls-files 2>/dev/null || true)
+              FILE_SET="${FILE_SET}${FILES:+$FILES"$'\n'"}"
+              ;;
+            explicit)
+              if [[ -n "$INPUT_EXPLICIT_FILES" ]]; then
+                FILE_SET="${FILE_SET}${INPUT_EXPLICIT_FILES}"$'\n'
+              fi
+              ;;
+            *)
+              echo "::warning::Unknown target: $t"
+              ;;
+          esac
+        done
+
+        # ── Deduplicate ───────────────────────────────────────────
+        FILE_SET=$(echo "$FILE_SET" | sort -u | sed '/^$/d')
+
+        # ── Apply include globs ───────────────────────────────────
+        if [[ -n "$INPUT_INCLUDE" ]]; then
+          INCLUDED=""
+          while IFS= read -r pattern; do
+            pattern=$(echo "$pattern" | xargs)
+            [[ -z "$pattern" ]] && continue
+            while IFS= read -r f; do
+              [[ -z "$f" ]] && continue
+              # Use bash extended globbing for matching
+              # We use a subshell with shopt to avoid side effects
+              if (shopt -s extglob globstar nullglob; [[ "$f" == $pattern ]]); then
+                INCLUDED="${INCLUDED}${f}"$'\n'
+              fi
+            done <<< "$FILE_SET"
+          done <<< "$INPUT_INCLUDE"
+          FILE_SET=$(echo "$INCLUDED" | sort -u | sed '/^$/d')
+        fi
+
+        # ── Apply exclude globs ───────────────────────────────────
+        if [[ -n "$INPUT_EXCLUDE" ]]; then
+          FILTERED=""
+          while IFS= read -r f; do
+            [[ -z "$f" ]] && continue
+            excluded=false
+            while IFS= read -r pattern; do
+              pattern=$(echo "$pattern" | xargs)
+              [[ -z "$pattern" ]] && continue
+              if (shopt -s extglob globstar nullglob; [[ "$f" == $pattern ]]); then
+                excluded=true
+                break
+              fi
+            done <<< "$INPUT_EXCLUDE"
+            if [[ "$excluded" == "false" ]]; then
+              FILTERED="${FILTERED}${f}"$'\n'
+            fi
+          done <<< "$FILE_SET"
+          FILE_SET=$(echo "$FILTERED" | sed '/^$/d')
+        fi
+
+        # ── Filter to existing regular files ──────────────────────
+        VALID_FILES=""
+        while IFS= read -r f; do
+          [[ -z "$f" ]] && continue
+          if [[ -f "$f" ]]; then
+            VALID_FILES="${VALID_FILES}${f}"$'\n'
+          fi
+        done <<< "$FILE_SET"
+        VALID_FILES=$(echo "$VALID_FILES" | sed '/^$/d')
+
+        # ── Check line counts ─────────────────────────────────────
+        CHECKED=""
+        OFFENDERS=""
+
+        if [[ -n "$VALID_FILES" ]]; then
+          while IFS= read -r f; do
+            [[ -z "$f" ]] && continue
+            LINES=$(wc -l < "$f" | xargs)
+            CHECKED="${CHECKED}${f}"$'\n'
+            if [[ "$LINES" -gt "$MAX_LINES" ]]; then
+              OFFENDERS="${OFFENDERS}${f} (${LINES} > ${MAX_LINES})"$'\n'
+            fi
+          done <<< "$VALID_FILES"
+        fi
+
+        CHECKED=$(echo "$CHECKED" | sed '/^$/d')
+        OFFENDERS=$(echo "$OFFENDERS" | sed '/^$/d')
+
+        # ── Set outputs ───────────────────────────────────────────
+        {
+          echo "checked_files<<LINECAP_EOF"
+          echo "$CHECKED"
+          echo "LINECAP_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "offenders<<LINECAP_EOF"
+          echo "$OFFENDERS"
+          echo "LINECAP_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        # ── Report ────────────────────────────────────────────────
+        FILE_COUNT=$(echo "$CHECKED" | grep -c . || true)
+        echo "::notice::LineCap checked $FILE_COUNT file(s) with max_lines=$MAX_LINES"
+
+        if [[ -n "$OFFENDERS" ]]; then
+          echo ""
+          echo "::error::Files exceeding $MAX_LINES lines:"
+          echo "$OFFENDERS" | while IFS= read -r line; do
+            echo "  $line"
+          done
+          exit 1
+        else
+          echo "All files are within the $MAX_LINES line limit."
+        fi
