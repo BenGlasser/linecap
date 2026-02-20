@@ -1,0 +1,124 @@
+name: Test Marketplace Action
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-pass:
+    name: 'Pass: files under limit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: BenGlasser/linecap@v1
+        id: pass
+        with:
+          targets: explicit
+          explicit_files: |
+            test/fixtures/small.txt
+          max_lines: '400'
+
+      - name: Verify outputs
+        shell: bash
+        run: |
+          echo "Checked: ${{ steps.pass.outputs.checked_files }}"
+          echo "Offenders: ${{ steps.pass.outputs.offenders }}"
+          if [[ -n "${{ steps.pass.outputs.offenders }}" ]]; then
+            echo "::error::Expected no offenders"
+            exit 1
+          fi
+
+  test-fail:
+    name: 'Fail: files over limit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: BenGlasser/linecap@v1
+        id: should-fail
+        continue-on-error: true
+        with:
+          targets: explicit
+          explicit_files: |
+            test/fixtures/big.txt
+          max_lines: '400'
+
+      - name: Verify action failed
+        shell: bash
+        run: |
+          if [[ "${{ steps.should-fail.outcome }}" != "failure" ]]; then
+            echo "::error::Expected failure for over-limit file"
+            exit 1
+          fi
+          echo "Correctly failed."
+
+      - name: Verify offenders output
+        shell: bash
+        run: |
+          if [[ -z "${{ steps.should-fail.outputs.offenders }}" ]]; then
+            echo "::error::Expected offenders output"
+            exit 1
+          fi
+          echo "Offenders: ${{ steps.should-fail.outputs.offenders }}"
+
+  test-all-targets:
+    name: 'All: scan entire repo'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: BenGlasser/linecap@v1
+        id: all
+        continue-on-error: true
+        with:
+          targets: all
+          max_lines: '400'
+          exclude: |
+            test/fixtures/big.txt
+
+      - name: Print results
+        shell: bash
+        run: |
+          echo "Checked files:"
+          echo "${{ steps.all.outputs.checked_files }}"
+          echo ""
+          echo "Offenders:"
+          echo "${{ steps.all.outputs.offenders }}"
+
+  test-include-exclude:
+    name: 'Globs: include/exclude filtering'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: BenGlasser/linecap@v1
+        id: filtered
+        with:
+          targets: all
+          max_lines: '400'
+          include: |
+            test/**/*.txt
+          exclude: |
+            test/fixtures/big.txt
+
+      - name: Verify only small.txt checked
+        shell: bash
+        run: |
+          CHECKED="${{ steps.filtered.outputs.checked_files }}"
+          echo "Checked: $CHECKED"
+          if [[ "$CHECKED" != *"small.txt"* ]]; then
+            echo "::error::Expected small.txt in checked files"
+            exit 1
+          fi
+          if [[ "$CHECKED" == *"big.txt"* ]]; then
+            echo "::error::big.txt should have been excluded"
+            exit 1
+          fi
