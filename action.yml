@@ -172,44 +172,55 @@ runs:
         # ── Deduplicate ───────────────────────────────────────────
         FILE_SET=$(echo "$FILE_SET" | sort -u | sed '/^$/d')
 
-        # ── Apply include globs ───────────────────────────────────
-        if [[ -n "$INPUT_INCLUDE" ]]; then
-          INCLUDED=""
-          while IFS= read -r pattern; do
-            pattern=$(echo "$pattern" | xargs)
-            [[ -z "$pattern" ]] && continue
-            while IFS= read -r f; do
-              [[ -z "$f" ]] && continue
-              # Use bash extended globbing for matching
-              # We use a subshell with shopt to avoid side effects
-              if (shopt -s extglob globstar nullglob; [[ "$f" == $pattern ]]); then
-                INCLUDED="${INCLUDED}${f}"$'\n'
-              fi
-            done <<< "$FILE_SET"
-          done <<< "$INPUT_INCLUDE"
-          FILE_SET=$(echo "$INCLUDED" | sort -u | sed '/^$/d')
-        fi
+        # ── Apply include/exclude globs via Python ─────────────────
+        # Python's pathlib handles ** globs reliably across all runners
+        FILE_SET=$(echo "$FILE_SET" | python3 -c "
+import sys, re, os
 
-        # ── Apply exclude globs ───────────────────────────────────
-        if [[ -n "$INPUT_EXCLUDE" ]]; then
-          FILTERED=""
-          while IFS= read -r f; do
-            [[ -z "$f" ]] && continue
-            excluded=false
-            while IFS= read -r pattern; do
-              pattern=$(echo "$pattern" | xargs)
-              [[ -z "$pattern" ]] && continue
-              if (shopt -s extglob globstar nullglob; [[ "$f" == $pattern ]]); then
-                excluded=true
-                break
-              fi
-            done <<< "$INPUT_EXCLUDE"
-            if [[ "$excluded" == "false" ]]; then
-              FILTERED="${FILTERED}${f}"$'\n'
-            fi
-          done <<< "$FILE_SET"
-          FILE_SET=$(echo "$FILTERED" | sed '/^$/d')
-        fi
+def glob_to_regex(pattern):
+    i, parts = 0, []
+    while i < len(pattern):
+        c = pattern[i]
+        if c == '*' and i + 1 < len(pattern) and pattern[i + 1] == '*':
+            if i + 2 < len(pattern) and pattern[i + 2] == '/':
+                parts.append('(.*/)?')
+                i += 3
+            else:
+                parts.append('.*')
+                i += 2
+        elif c == '*':
+            parts.append('[^/]*')
+            i += 1
+        elif c == '?':
+            parts.append('[^/]')
+            i += 1
+        elif c in r'.+^${}()|\\[]':
+            parts.append('\\\\' + c)
+            i += 1
+        else:
+            parts.append(c)
+            i += 1
+    return re.compile('^' + ''.join(parts) + r'$')
+
+def parse_patterns(env_key):
+    val = os.environ.get(env_key, '').strip()
+    if not val:
+        return []
+    return [glob_to_regex(p.strip()) for p in val.splitlines() if p.strip()]
+
+include = parse_patterns('INPUT_INCLUDE')
+exclude = parse_patterns('INPUT_EXCLUDE')
+
+for line in sys.stdin:
+    f = line.strip()
+    if not f:
+        continue
+    if include and not any(r.match(f) for r in include):
+        continue
+    if exclude and any(r.match(f) for r in exclude):
+        continue
+    print(f)
+")
 
         # ── Filter to existing regular files ──────────────────────
         VALID_FILES=""
