@@ -179,14 +179,16 @@ runs:
         echo "[linecap] glob-filter.py exists: $(test -f "$GITHUB_ACTION_PATH/glob-filter.py" && echo yes || echo no)"
 
         # ── Apply include/exclude globs ───────────────────────────
-        FILTER_OUTPUT=$(echo "$FILE_SET" | python3 "$GITHUB_ACTION_PATH/glob-filter.py" 2>&1) || {
+        FILTER_DBG=$(mktemp)
+        FILE_SET=$(echo "$FILE_SET" | python3 "$GITHUB_ACTION_PATH/glob-filter.py" 2>"$FILTER_DBG") || {
           echo "[linecap] glob-filter.py FAILED with exit code $?"
-          echo "[linecap] output: $FILTER_OUTPUT"
         }
-        FILE_SET="$FILTER_OUTPUT"
+        echo "[linecap] Python debug:"
+        cat "$FILTER_DBG"
+        rm -f "$FILTER_DBG"
 
         echo "[linecap] Files after filter: $(echo "$FILE_SET" | wc -l | xargs)"
-        echo "[linecap] Filtered files: $FILE_SET"
+        echo "[linecap] Filtered files: [$FILE_SET]"
 
         # ── Filter to existing regular files ──────────────────────
         VALID_FILES=""

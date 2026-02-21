@@ -32,15 +32,25 @@ def parse_patterns(env_key):
         return []
     return [glob_to_regex(p.strip()) for p in val.splitlines() if p.strip()]
 
+def dbg(msg):
+    print(msg, file=sys.stderr)
+
 include = parse_patterns('INPUT_INCLUDE')
 exclude = parse_patterns('INPUT_EXCLUDE')
 
-for line in sys.stdin:
+dbg(f"include: {[r.pattern for r in include]}")
+dbg(f"exclude: {[r.pattern for r in exclude]}")
+
+lines = sys.stdin.readlines()
+dbg(f"stdin lines: {len(lines)}")
+
+for line in lines:
     f = line.strip()
     if not f:
         continue
-    if include and not any(r.match(f) for r in include):
-        continue
-    if exclude and any(r.match(f) for r in exclude):
-        continue
-    print(f)
+    inc_match = not include or any(r.match(f) for r in include)
+    exc_match = exclude and any(r.match(f) for r in exclude)
+    if f.startswith('test/'):
+        dbg(f"  {f}: inc={inc_match} exc={exc_match}")
+    if inc_match and not exc_match:
+        print(f)
