@@ -36,7 +36,9 @@ jobs:
 
       - name: Move major tag
         run: |
-          COMMIT=$(git rev-parse "${{ inputs.version_tag }}")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          COMMIT=$(git rev-parse "${{ inputs.version_tag }}^{}")
           git tag -fa "${{ steps.major.outputs.tag }}" "$COMMIT" -m "Move ${{ steps.major.outputs.tag }} to ${{ inputs.version_tag }}"
           git push origin "${{ steps.major.outputs.tag }}" --force
           echo "Moved ${{ steps.major.outputs.tag }} to ${{ inputs.version_tag }} ($COMMIT)"
