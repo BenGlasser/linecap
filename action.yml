@@ -174,10 +174,7 @@ runs:
         FILE_SET=$(echo "$FILE_SET" | sort -u | sed '/^$/d')
 
         # ── Apply include/exclude globs ───────────────────────────
-        FILTER_DBG=$(mktemp)
-        FILE_SET=$(echo "$FILE_SET" | python3 "$GITHUB_ACTION_PATH/glob-filter.py" 2>"$FILTER_DBG")
-        cat "$FILTER_DBG"
-        rm -f "$FILTER_DBG"
+        FILE_SET=$(echo "$FILE_SET" | python3 "$GITHUB_ACTION_PATH/glob-filter.py")
 
         # ── Filter to existing regular files ──────────────────────
         VALID_FILES=""
