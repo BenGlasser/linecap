@@ -12,7 +12,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: BenGlasser/linecap@v1
+      - uses: ./
         id: pass
         with:
           targets: explicit
@@ -38,7 +38,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: BenGlasser/linecap@v1
+      - uses: ./
         id: should-fail
         continue-on-error: true
         with:
@@ -73,7 +73,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: BenGlasser/linecap@v1
+      - uses: ./
         id: all
         continue-on-error: true
         with:
@@ -99,7 +99,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: BenGlasser/linecap@v1
+      - uses: ./
         id: filtered
         with:
           targets: all
