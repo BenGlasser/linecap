@@ -138,6 +138,7 @@ runs:
 
         # ── Collect file set (union of targets) ───────────────────
         FILE_SET=""
+        NL=$'\n'
 
         for t in "${TARGET_LIST[@]}"; do
           t=$(echo "$t" | xargs)
@@ -145,22 +146,22 @@ runs:
             new)
               if [[ -n "$BASE" && -n "$HEAD" ]]; then
                 FILES=$(git diff --name-only --diff-filter=A "$BASE" "$HEAD" 2>/dev/null || true)
-                FILE_SET="${FILE_SET}${FILES:+$FILES"$'\n'"}"
+                [[ -n "$FILES" ]] && FILE_SET="${FILE_SET}${FILES}${NL}"
               fi
               ;;
             changed)
               if [[ -n "$BASE" && -n "$HEAD" ]]; then
                 FILES=$(git diff --name-only --diff-filter=AMRC "$BASE" "$HEAD" 2>/dev/null || true)
-                FILE_SET="${FILE_SET}${FILES:+$FILES"$'\n'"}"
+                [[ -n "$FILES" ]] && FILE_SET="${FILE_SET}${FILES}${NL}"
               fi
               ;;
             all)
               FILES=$(git ls-files 2>/dev/null || true)
-              FILE_SET="${FILE_SET}${FILES:+$FILES"$'\n'"}"
+              [[ -n "$FILES" ]] && FILE_SET="${FILE_SET}${FILES}${NL}"
               ;;
             explicit)
               if [[ -n "$INPUT_EXPLICIT_FILES" ]]; then
-                FILE_SET="${FILE_SET}${INPUT_EXPLICIT_FILES}"$'\n'
+                FILE_SET="${FILE_SET}${INPUT_EXPLICIT_FILES}${NL}"
               fi
               ;;
             *)
