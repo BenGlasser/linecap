@@ -172,23 +172,8 @@ runs:
         # ── Deduplicate ───────────────────────────────────────────
         FILE_SET=$(echo "$FILE_SET" | sort -u | sed '/^$/d')
 
-        echo "[linecap] Files before filter: $(echo "$FILE_SET" | wc -l | xargs)"
-        echo "[linecap] INPUT_INCLUDE=[$INPUT_INCLUDE]"
-        echo "[linecap] INPUT_EXCLUDE=[$INPUT_EXCLUDE]"
-        echo "[linecap] GITHUB_ACTION_PATH=[$GITHUB_ACTION_PATH]"
-        echo "[linecap] glob-filter.py exists: $(test -f "$GITHUB_ACTION_PATH/glob-filter.py" && echo yes || echo no)"
-
         # ── Apply include/exclude globs ───────────────────────────
-        FILTER_DBG=$(mktemp)
-        FILE_SET=$(echo "$FILE_SET" | python3 "$GITHUB_ACTION_PATH/glob-filter.py" 2>"$FILTER_DBG") || {
-          echo "[linecap] glob-filter.py FAILED with exit code $?"
-        }
-        echo "[linecap] Python debug:"
-        cat "$FILTER_DBG"
-        rm -f "$FILTER_DBG"
-
-        echo "[linecap] Files after filter: $(echo "$FILE_SET" | wc -l | xargs)"
-        echo "[linecap] Filtered files: [$FILE_SET]"
+        FILE_SET=$(echo "$FILE_SET" | python3 "$GITHUB_ACTION_PATH/glob-filter.py")
 
         # ── Filter to existing regular files ──────────────────────
         VALID_FILES=""
